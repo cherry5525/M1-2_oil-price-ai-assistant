@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>김해 휘발유 가격 AI 비서</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>⛽ 김해 휘발유 가격 AI 비서</h1>
+    <button id="themeBtn" class="icon-btn" title="다크 모드 전환">🌙</button>
+  </header>
+
+  <div id="notice" class="notice hidden">
+    ⏳ 서버를 깨우는 중이에요. 무료 서버는 한동안 쓰지 않으면 잠들어서 첫 응답에 최대 1분 정도 걸릴 수 있어요.
+  </div>
+
+  <main class="layout">
+    <!-- 왼쪽: 대화 기록 -->
+    <aside class="sidebar card">
+      <button id="newChatBtn" class="primary full">＋ 새 대화</button>
+      <h2>대화 기록</h2>
+      <ul id="convList" class="conv-list"></ul>
+    </aside>
+
+    <!-- 오른쪽: 요약 + 탭 -->
+    <section class="content">
+      <!-- 데이터 요약 -->
+      <section class="card">
+        <h2>📊 데이터 요약</h2>
+        <p id="summaryPeriod" class="muted">불러오는 중...</p>
+        <div id="summaryGrid" class="stat-grid"></div>
+        <p id="summaryTrend" class="trend"></p>
+      </section>
+
+      <nav class="tabs">
+        <button class="tab-btn active" data-tab="chat">💬 AI 채팅</button>
+        <button class="tab-btn" data-tab="data">🗂 데이터 관리</button>
+      </nav>
+
+      <!-- 채팅 -->
+      <section id="tab-chat" class="tab card">
+        <div id="messages" class="messages"></div>
+        <div class="chat-input">
+          <textarea id="chatInput" rows="2" maxlength="1000"
+            placeholder="질문을 입력하세요 (Enter: 전송, Shift+Enter: 줄바꿈)"></textarea>
+          <button id="sendBtn" class="primary">전송</button>
+        </div>
+      </section>
+
+      <!-- 데이터 관리 -->
+      <section id="tab-data" class="tab card hidden">
+        <h2>새 데이터 추가</h2>
+        <form id="addForm" class="add-form">
+          <label>날짜 <input type="date" id="addDate" required /></label>
+          <label>가격(원/L) <input type="number" id="addValue" step="0.1" min="0.1" placeholder="예: 1700" required /></label>
+          <label class="grow">메모 <input type="text" id="addMemo" maxlength="100" placeholder="선택" /></label>
+          <button type="submit" class="primary">추가</button>
+        </form>
+
+        <h2>데이터 목록 <span class="muted small">(최신순)</span></h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>날짜</th><th>가격</th><th>메모</th><th>관리</th></tr>
+            </thead>
+            <tbody id="dataBody"></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <button id="prevBtn">◀ 이전</button>
+          <span id="pageInfo" class="muted"></span>
+          <button id="nextBtn">다음 ▶</button>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
