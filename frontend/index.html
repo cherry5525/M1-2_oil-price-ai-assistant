@@ -37,6 +37,7 @@
       <nav class="tabs">
         <button class="tab-btn active" data-tab="chat">💬 AI 채팅</button>
         <button class="tab-btn" data-tab="data">🗂 데이터 관리</button>
+        <button class="tab-btn" data-tab="chart">📈 가격 추이</button>
       </nav>
 
       <!-- 채팅 -->
@@ -59,7 +60,13 @@
           <button type="submit" class="primary">추가</button>
         </form>
 
-        <h2>데이터 목록 <span class="muted small">(최신순)</span></h2>
+        <div class="list-head">
+          <h2>데이터 목록 <span class="muted small">(최신순)</span></h2>
+          <div class="export">
+            <a id="exportCsv" class="btn" href="#">⬇ CSV</a>
+            <a id="exportJson" class="btn" href="#">⬇ JSON</a>
+          </div>
+        </div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -73,6 +80,13 @@
           <span id="pageInfo" class="muted"></span>
           <button id="nextBtn">다음 ▶</button>
         </div>
+      </section>
+
+      <!-- 가격 추이 그래프 -->
+      <section id="tab-chart" class="tab card hidden">
+        <h2>월별 평균 가격 추이</h2>
+        <p id="chartCaption" class="muted small">불러오는 중...</p>
+        <div id="chartBox" class="chart-box"></div>
       </section>
     </section>
   </main>

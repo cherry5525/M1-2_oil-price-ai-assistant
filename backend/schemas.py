@@ -70,6 +70,20 @@ class DataSummary(BaseModel):
     trend: str
 
 
+class MonthlyStat(BaseModel):
+    month: str = Field(description="YYYY-MM")
+    avg: float
+    min: float
+    max: float
+    days: int = Field(description="해당 월의 데이터 일수")
+    change_pct: Optional[float] = Field(default=None, description="전월 평균 대비 변동률(%)")
+
+
+class DataStatistics(BaseModel):
+    """GET /api/data/statistics 응답 (그래프용)"""
+    monthly: List[MonthlyStat]
+
+
 # ---------------------------------------------------------------
 # AI 채팅 (POST /api/chat)
 # ---------------------------------------------------------------

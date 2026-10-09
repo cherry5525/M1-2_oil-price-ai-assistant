@@ -101,6 +101,8 @@ function showTab(name) {
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   $("#tab-chat").classList.toggle("hidden", name !== "chat");
   $("#tab-data").classList.toggle("hidden", name !== "data");
+  $("#tab-chart").classList.toggle("hidden", name !== "chart");
+  if (name === "chart") loadChart(); // 탭을 열 때마다 최신 데이터로 다시 그림
 }
 
 // =====================================================================
@@ -469,9 +471,109 @@ document.addEventListener("DOMContentLoaded", () => {
   initTabs();
   initChat();
   initDataForm();
+  initExport();
   showWelcome();
 
   loadSummary();
   loadConversations();
   loadData();
 });
+
+// =====================================================================
+// 내보내기 (CSV / JSON 다운로드)
+// =====================================================================
+function initExport() {
+  // 서버가 Content-Disposition: attachment 로 응답하므로 링크를 누르면 바로 파일이 내려받아진다
+  $("#exportCsv").href = `${API}/api/data/export?format=csv`;
+  $("#exportJson").href = `${API}/api/data/export?format=json`;
+}
+
+// =====================================================================
+// 가격 추이 그래프 (외부 라이브러리 없이 SVG로 직접 그림)
+// =====================================================================
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function svgEl(tag, attrs = {}, className) {
+  const node = document.createElementNS(SVG_NS, tag);
+  Object.entries(attrs).forEach(([k, v]) => node.setAttribute(k, v));
+  if (className) node.setAttribute("class", className);
+  return node;
+}
+
+async function loadChart() {
+  try {
+    const stat = await api("/api/data/statistics");
+    renderChart(stat.monthly);
+  } catch (e) {
+    $("#chartBox").innerHTML = "";
+    $("#chartCaption").textContent = "그래프를 불러오지 못했어요: " + e.message;
+  }
+}
+
+function renderChart(monthly) {
+  const box = $("#chartBox");
+  box.innerHTML = "";
+
+  if (monthly.length < 2) {
+    $("#chartCaption").textContent = "그래프를 그리려면 2개월 이상의 데이터가 필요해요.";
+    return;
+  }
+
+  // ---- 크기와 좌표 계산 ----
+  const W = 800, H = 340;
+  const margin = { left: 62, right: 18, top: 16, bottom: 42 };
+  const innerW = W - margin.left - margin.right;
+  const innerH = H - margin.top - margin.bottom;
+
+  const avgs = monthly.map((d) => d.avg);
+  const pad = (Math.max(...avgs) - Math.min(...avgs)) * 0.1 || 10;
+  const yMin = Math.floor((Math.min(...avgs) - pad) / 10) * 10;
+  const yMax = Math.ceil((Math.max(...avgs) + pad) / 10) * 10;
+
+  const x = (i) => margin.left + (innerW * i) / (monthly.length - 1);
+  const y = (v) => margin.top + innerH * (1 - (v - yMin) / (yMax - yMin));
+
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "월별 평균 휘발유 가격 추이" }, "chart");
+
+  // ---- 가로 눈금선 + 가격 라벨 ----
+  for (let i = 0; i <= 4; i++) {
+    const value = yMin + ((yMax - yMin) * i) / 4;
+    svg.appendChild(svgEl("line", { x1: margin.left, x2: W - margin.right, y1: y(value), y2: y(value) }, "chart-grid"));
+    const label = svgEl("text", { x: margin.left - 8, y: y(value) + 4, "text-anchor": "end" }, "chart-text");
+    label.textContent = fmt(value, 0);
+    svg.appendChild(label);
+  }
+
+  // ---- 세로 라벨 (월) ----
+  const every = Math.ceil(monthly.length / 8);
+  monthly.forEach((d, i) => {
+    if (i % every !== 0) return;
+    const label = svgEl("text", { x: x(i), y: H - margin.bottom + 20, "text-anchor": "middle" }, "chart-text");
+    label.textContent = d.month.replace("-", ".");
+    svg.appendChild(label);
+  });
+
+  // ---- 꺾은선 ----
+  const path = monthly.map((d, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)} ${y(d.avg).toFixed(1)}`).join(" ");
+  svg.appendChild(svgEl("path", { d: path }, "chart-line"));
+
+  // ---- 점 + 마우스를 올리면 나오는 설명 ----
+  monthly.forEach((d, i) => {
+    const dot = svgEl("circle", { cx: x(i), cy: y(d.avg), r: 4 }, "chart-dot");
+    const tip = svgEl("title");
+    const change = d.change_pct == null ? "" : `\n전월 대비 ${d.change_pct > 0 ? "+" : ""}${d.change_pct}%`;
+    tip.textContent = `${d.month}\n평균 ${fmt(d.avg)}원\n최저 ${fmt(d.min)}원 ~ 최고 ${fmt(d.max)}원 (${d.days}일)${change}`;
+    dot.appendChild(tip);
+    svg.appendChild(dot);
+  });
+
+  box.appendChild(svg);
+
+  // ---- 그래프 아래 한 줄 요약 ----
+  const high = monthly.reduce((a, b) => (b.avg > a.avg ? b : a));
+  const low = monthly.reduce((a, b) => (b.avg < a.avg ? b : a));
+  const last = monthly[monthly.length - 1];
+  const lastChange = last.change_pct == null ? "" : ` · 가장 최근 달은 전월 대비 ${last.change_pct > 0 ? "+" : ""}${last.change_pct}%`;
+  $("#chartCaption").textContent =
+    `평균이 가장 높았던 달: ${high.month}(${fmt(high.avg)}원) · 가장 낮았던 달: ${low.month}(${fmt(low.avg)}원)${lastChange}  (점에 마우스를 올려 보세요)`;
+}

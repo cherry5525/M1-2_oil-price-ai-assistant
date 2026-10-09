@@ -1,11 +1,14 @@
+import csv
+import io
+import json
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from google.cloud.firestore_v1 import Query as FSQuery
 
 from firebase_client import db  # firebase_client.py에서 만든 Firestore 클라이언트
-from schemas import DataCreate, DataResponse, DataSummary, DataUpdate
-from services.data_service import compute_summary, invalidate_cache
+from schemas import DataCreate, DataResponse, DataStatistics, DataSummary, DataUpdate
+from services.data_service import compute_summary, get_records, invalidate_cache, monthly_statistics
 
 router = APIRouter(prefix="/api/data", tags=["data"])
 
@@ -31,6 +34,44 @@ def get_summary(
 ):
     """데이터 요약: 기간, 개수, 주요 지표, 최근 추세 (AI 시스템 프롬프트에 주입되는 정보)"""
     return compute_summary(start_date, end_date)
+
+
+@router.get("/statistics", response_model=DataStatistics)
+def get_statistics(
+    start_date: Optional[str] = Query(None, description="시작일 (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="종료일 (YYYY-MM-DD)"),
+):
+    """월별 통계(평균/최저/최고/전월 대비 변동률). 프론트엔드 그래프에서 사용합니다."""
+    return {"monthly": monthly_statistics(start_date, end_date)}
+
+
+@router.get("/export")
+def export_data(
+    file_format: str = Query("csv", alias="format", pattern="^(csv|json)$", description="csv 또는 json"),
+    start_date: Optional[str] = Query(None, description="시작일 (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="종료일 (YYYY-MM-DD)"),
+):
+    """데이터 내보내기 (파일 다운로드). 컬럼: date, value, memo"""
+    records = get_records(start_date, end_date)
+
+    if file_format == "json":
+        content = json.dumps(records, ensure_ascii=False, indent=2)
+        media_type = "application/json"
+        filename = "gimhae_gasoline.json"
+    else:
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=["date", "value", "memo"])
+        writer.writeheader()
+        writer.writerows(records)
+        content = "\ufeff" + buffer.getvalue()  # 맨 앞의 BOM: 엑셀에서 한글이 깨지지 않게 함
+        media_type = "text/csv; charset=utf-8"
+        filename = "gimhae_gasoline.csv"
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("", response_model=DataResponse, status_code=status.HTTP_201_CREATED)

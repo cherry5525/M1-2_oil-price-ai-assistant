@@ -216,3 +216,28 @@ td.empty { text-align: center; color: var(--muted); }
   .messages { height: 340px; }
   .bubble { max-width: 92%; }
 }
+
+/* 목록 머리글 + 내보내기 버튼 */
+.list-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.list-head h2 { margin: 0 0 10px; }
+.export { display: flex; gap: 8px; margin-bottom: 10px; }
+a.btn {
+  font: inherit;
+  font-size: 0.9rem;
+  text-decoration: none;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+a.btn:hover { border-color: var(--primary); }
+
+/* 가격 추이 그래프 (색은 변수라서 다크 모드에서도 자동으로 바뀜) */
+.chart-box { width: 100%; }
+.chart { width: 100%; height: auto; display: block; }
+.chart-grid { stroke: var(--border); stroke-width: 1; }
+.chart-text { fill: var(--muted); font-size: 12px; }
+.chart-line { fill: none; stroke: var(--primary); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.chart-dot { fill: var(--card); stroke: var(--primary); stroke-width: 2; cursor: pointer; }
+.chart-dot:hover { fill: var(--primary); }
