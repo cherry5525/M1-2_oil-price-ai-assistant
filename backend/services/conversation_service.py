@@ -8,14 +8,24 @@
     "updated_at": "2026-10-08T01:25:10+00:00"
   }
 """
+import json
 from datetime import datetime, timezone
 from typing import List, Optional
 
 from google.cloud.firestore_v1 import Query as FSQuery
+from google.cloud.firestore_v1 import transactional
 
 from firebase_client import db  # 변수 이름이 db가 아니면 다른 파일과 똑같이 맞춰주세요
 
 COLLECTION = "conversations"
+
+# Firestore 문서 하나는 최대 1MiB(1,048,576바이트). 한 번의 질문/답변이 약 20KB를 넘지 않으므로 여유를 두고 900KB로 제한한다.
+MAX_CONVERSATION_BYTES = 900_000
+
+
+def messages_size_bytes(messages: List[dict]) -> int:
+    """메시지 목록이 차지하는 대략적인 저장 크기(바이트)"""
+    return len(json.dumps(messages, ensure_ascii=False).encode("utf-8"))
 
 
 def _now() -> str:
@@ -66,18 +76,28 @@ def list_conversations(limit: int = 50) -> List[dict]:
     return result
 
 
+def _append_logic(transaction, ref, new_messages: List[dict]) -> Optional[dict]:
+    """읽고 -> 합치고 -> 쓰기. 트랜잭션 안에서 실행되므로, 읽은 뒤 다른 요청이 같은 대화를 바꾸면
+    Firestore가 이 함수를 처음부터 다시 실행해 준다. (한쪽이 다른 쪽을 덮어쓰는 일이 없음)"""
+    snapshot = ref.get(transaction=transaction)
+    if not snapshot.exists:
+        return None
+
+    data = snapshot.to_dict()
+    messages = data.get("messages", []) + new_messages
+    updated_at = _now()
+    transaction.update(ref, {"messages": messages, "updated_at": updated_at})
+    return {"id": ref.id, **data, "messages": messages, "updated_at": updated_at}
+
+
+# ArrayUnion은 내용이 같은 메시지(같은 질문 두 번)를 하나로 합쳐 버리므로 쓰지 않고, 대신 트랜잭션을 사용한다.
+_append_in_transaction = transactional(_append_logic)
+
+
 def append_messages(conversation_id: str, new_messages: List[dict]) -> Optional[dict]:
     """기존 대화 끝에 메시지를 이어 붙인다. 대화가 없으면 None"""
     ref = db.collection(COLLECTION).document(conversation_id)
-    doc = ref.get()
-    if not doc.exists:
-        return None
-
-    data = doc.to_dict()
-    messages = data.get("messages", []) + new_messages
-    updated_at = _now()
-    ref.update({"messages": messages, "updated_at": updated_at})
-    return {"id": conversation_id, **data, "messages": messages, "updated_at": updated_at}
+    return _append_in_transaction(db.transaction(), ref, new_messages)
 
 
 def delete_conversation(conversation_id: str) -> bool:

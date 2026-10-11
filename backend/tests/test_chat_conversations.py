@@ -68,3 +68,88 @@ def test_conversation_crud(client, db):
     assert client.get(f"/api/conversations/{conv_id}").status_code == 404
     assert client.delete(f"/api/conversations/{conv_id}").status_code == 404
     assert client.post("/api/conversations", json={"messages": []}).status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# 요청 제한 / 동시성 / 용량 제한
+# ---------------------------------------------------------------------------
+def test_chat_rate_limit_returns_429_with_retry_after(client, db, fake_ai, monkeypatch):
+    import routers.chat as chat_router
+    from services.rate_limiter import RateLimiter
+
+    monkeypatch.setattr(chat_router, "chat_limiter", RateLimiter(per_minute=2, per_day=100))
+    assert client.post("/api/chat", json={"message": "1"}).status_code == 200
+    assert client.post("/api/chat", json={"message": "2"}).status_code == 200
+
+    r = client.post("/api/chat", json={"message": "3"})
+    assert r.status_code == 429
+    assert "초 뒤에 다시" in r.json()["detail"]
+    assert int(r.headers["retry-after"]) >= 1
+    assert len(fake_ai) == 2  # 거절된 요청은 AI를 호출하지 않음 (비용이 들지 않음)
+
+
+def test_daily_limit_message(client, db, fake_ai, monkeypatch):
+    import routers.chat as chat_router
+    from services.rate_limiter import RateLimiter
+
+    monkeypatch.setattr(chat_router, "chat_limiter", RateLimiter(per_minute=100, per_day=1))
+    client.post("/api/chat", json={"message": "1"})
+    r = client.post("/api/chat", json={"message": "2"})
+    assert r.status_code == 429 and "하루 질문 한도" in r.json()["detail"]
+
+
+def test_rejected_requests_do_not_use_up_the_limit(client, db, fake_ai, monkeypatch):
+    import routers.chat as chat_router
+    from services.rate_limiter import RateLimiter
+
+    monkeypatch.setattr(chat_router, "chat_limiter", RateLimiter(per_minute=1, per_day=100))
+    assert client.post("/api/chat", json={"message": "x", "conversation_id": "없는id"}).status_code == 404
+    assert client.post("/api/chat", json={"message": ""}).status_code == 422
+    assert client.post("/api/chat", json={"message": "정상 질문"}).status_code == 200  # 한도를 소모하지 않았으므로 성공
+
+
+def test_oversized_conversation_is_rejected_before_calling_ai(client, db, fake_ai):
+    from services import conversation_service
+
+    db.collections["conversations"]["big"] = {
+        "title": "큰 대화", "created_at": "", "updated_at": "",
+        "messages": [{"role": "user", "content": "가" * 400_000}, {"role": "assistant", "content": "나" * 400_000}],
+    }
+    assert conversation_service.messages_size_bytes(db.collections["conversations"]["big"]["messages"]) > conversation_service.MAX_CONVERSATION_BYTES
+
+    r = client.post("/api/chat", json={"message": "계속", "conversation_id": "big"})
+    assert r.status_code == 409 and "새 대화" in r.json()["detail"]
+    assert fake_ai == []  # AI를 호출하지 않았다
+
+
+def test_append_goes_through_a_transaction(client, db, fake_ai):
+    conv_id = client.post("/api/chat", json={"message": "첫 질문"}).json()["conversation_id"]
+    assert db.transaction_updates == 0  # 새 대화 생성은 트랜잭션이 필요 없음
+    client.post("/api/chat", json={"message": "두번째", "conversation_id": conv_id})
+    assert db.transaction_updates == 1  # 이어 붙이기는 트랜잭션 경로로 저장됨
+
+
+def test_append_to_missing_conversation_returns_none(db):
+    from services import conversation_service
+
+    assert conversation_service.append_messages("없는id", [{"role": "user", "content": "x"}]) is None
+
+
+def test_reply_is_not_lost_if_conversation_is_deleted_while_ai_is_answering(client, db, monkeypatch):
+    """AI가 답하는 동안 같은 대화가 삭제되어도 답변이 사라지지 않고 새 대화로 저장된다."""
+    monkeypatch.setattr(ai_service, "client", object())
+    conv_id = None
+
+    def run_chat_and_delete(message, history):
+        db.collections["conversations"].pop(conv_id)  # 답변을 만드는 도중 삭제
+        return "답변", []
+
+    monkeypatch.setattr(ai_service, "run_chat", run_chat_and_delete)
+    db.collections["conversations"]["c1"] = {"title": "t", "created_at": "", "updated_at": "",
+                                             "messages": [{"role": "user", "content": "a"}]}
+    conv_id = "c1"
+
+    r = client.post("/api/chat", json={"message": "질문", "conversation_id": "c1"})
+    assert r.status_code == 200
+    new_id = r.json()["conversation_id"]
+    assert new_id != "c1" and db.collections["conversations"][new_id]["messages"][1]["content"] == "답변"

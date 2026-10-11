@@ -11,6 +11,7 @@ from config import (
     OPENAI_MAX_COMPLETION_TOKENS,
     OPENAI_MODEL,
     OPENAI_TIMEOUT_SECONDS,
+    OPENAI_TOKEN_PARAM,
 )
 from services.data_service import compute_summary, get_rows
 
@@ -158,7 +159,7 @@ def _system_prompt() -> str:
 1. 위 요약을 기본 근거로 맞춤형 답변을 하세요. 요약에 없는 세부 값(특정 날짜의 가격, 특정 기간의 평균, 월별 추이 등)은 제공된 도구로 조회한 뒤 답하세요. 기억이나 추측으로 숫자를 말하지 마세요.
 2. '올해', '지난달', '최근'처럼 상대적인 기간은 오늘 날짜 기준으로 계산해 YYYY-MM-DD로 바꿔서 도구에 전달하세요.
 3. 보유 데이터 기간 밖의 질문이면 보유 기간을 안내하고, 해당 기간은 답할 수 없다고 말하세요.
-4. 한국어로 간결하고 친절하게 답하세요. 가격은 '1,682.7원/L'처럼 천 단위 쉼표와 단위를 붙이세요.
+4. 한국어로 간결하고 친절하게 답하세요. 가격은 '1,700.5원/L'처럼 천 단위 쉼표와 단위를 붙이세요.
 5. 휘발유 가격과 무관한 질문에는 정중하게 답변 가능한 범위를 안내하세요.
 6. 가격 전망이나 주유 시점을 단정하지 말고, 과거 데이터에 근거한 참고 의견임을 밝히세요."""
 
@@ -175,9 +176,9 @@ def run_chat(message: str, history: List[dict]) -> tuple[str, List[str]]:
     tools_used: List[str] = []
 
     for _ in range(MAX_TOOL_ROUNDS):
-        # 출력 토큰 상한. gpt-5 계열은 추론 토큰도 포함되므로 넉넉하게 잡는다.
-        # (0 이하로 설정하면 상한 없이 호출 - 서버가 이 옵션을 지원하지 않을 때 사용)
-        limits = {"max_completion_tokens": OPENAI_MAX_COMPLETION_TOKENS} if OPENAI_MAX_COMPLETION_TOKENS > 0 else {}
+        # 출력 토큰 상한은 항상 적용한다. gpt-5 계열은 추론 토큰도 포함되므로 넉넉하게 잡는다.
+        # (서버가 max_completion_tokens를 지원하지 않을 때는 OPENAI_TOKEN_PARAM=max_tokens 로 이름만 바꾼다)
+        limits = {OPENAI_TOKEN_PARAM: OPENAI_MAX_COMPLETION_TOKENS}
         response = client.chat.completions.create(
             model=MODEL,
             messages=messages,

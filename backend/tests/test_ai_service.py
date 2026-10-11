@@ -29,11 +29,13 @@ def test_token_limit_is_sent(monkeypatch):
     assert calls[0]["max_completion_tokens"] == ai_service.OPENAI_MAX_COMPLETION_TOKENS > 0
 
 
-def test_token_limit_can_be_disabled(monkeypatch):
+def test_token_limit_is_always_applied_even_with_alternative_param_name(monkeypatch):
+    """서버가 max_completion_tokens를 지원하지 않아 max_tokens로 바꿔도, 상한 자체는 항상 전달된다."""
     calls = []
-    monkeypatch.setattr(ai_service, "OPENAI_MAX_COMPLETION_TOKENS", 0)
+    monkeypatch.setattr(ai_service, "OPENAI_TOKEN_PARAM", "max_tokens")
     monkeypatch.setattr(ai_service, "client", fake_client([("ok", "stop")], calls))
     ai_service.run_chat("질문", [])
+    assert calls[0]["max_tokens"] == ai_service.OPENAI_MAX_COMPLETION_TOKENS > 0
     assert "max_completion_tokens" not in calls[0]
 
 

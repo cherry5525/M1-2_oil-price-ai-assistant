@@ -17,7 +17,7 @@ class Ref:
         self.store = store
         self.id = doc_id
 
-    def get(self):
+    def get(self, transaction=None):
         return Snap(self.id, self.store.get(self.id))
 
     def update(self, updates):
@@ -90,9 +90,24 @@ class Collection(Query):
         return None, Ref(self.store, doc_id)
 
 
+class FakeTransaction:
+    """진짜 트랜잭션처럼 동작하지는 않고, 트랜잭션 경로로 쓰기가 일어났는지만 기록한다."""
+
+    def __init__(self, db):
+        self.db = db
+
+    def update(self, ref, updates):
+        self.db.transaction_updates += 1
+        ref.update(updates)
+
+
 class FakeDB:
     def __init__(self):
         self.collections = defaultdict(dict)  # 컬렉션 이름 -> {문서 id: 데이터}
+        self.transaction_updates = 0
+
+    def transaction(self):
+        return FakeTransaction(self)
 
     def collection(self, name):
         return Collection(self.collections[name])

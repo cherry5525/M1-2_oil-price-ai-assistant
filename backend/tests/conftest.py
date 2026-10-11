@@ -23,6 +23,16 @@ except ImportError:
         DESCENDING = "DESCENDING"
 
     sys.modules["google.cloud.firestore_v1"].Query = _Query
+    sys.modules["google.cloud.firestore_v1"].transactional = lambda func: func
+
+
+@pytest.fixture(autouse=True)
+def fresh_chat_limiter(monkeypatch):
+    """테스트끼리 요청 횟수 기록이 섞이지 않도록, 테스트마다 넉넉한 새 제한기를 끼워 넣는다."""
+    import routers.chat as chat_router
+    from services.rate_limiter import RateLimiter
+
+    monkeypatch.setattr(chat_router, "chat_limiter", RateLimiter(10_000, 100_000))
 
 
 @pytest.fixture
@@ -35,6 +45,8 @@ def db(monkeypatch):
     fake = FakeDB()
     for module in (data_router, data_service, conversation_service):
         monkeypatch.setattr(module, "db", fake)
+    # 진짜 Firestore 트랜잭션 데코레이터 대신, 같은 로직을 일반 함수로 실행한다 (가짜 DB에는 트랜잭션 엔진이 없으므로)
+    monkeypatch.setattr(conversation_service, "_append_in_transaction", conversation_service._append_logic)
     data_service.invalidate_cache()
     yield fake
     data_service.invalidate_cache()
