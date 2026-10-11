@@ -35,10 +35,10 @@ def chat(body: ChatRequest):
         raise HTTPException(status_code=502, detail=f"AI 호출 중 오류가 발생했습니다: {e}")
 
     # 3) 대화 자동 저장
-    new_messages = [
-        {"role": "user", "content": body.message},
-        {"role": "assistant", "content": reply},
-    ]
+    assistant_message = {"role": "assistant", "content": reply}
+    if tools_used:  # 대화를 다시 열어도 "추가 조회" 표시가 보이도록 함께 저장
+        assistant_message["tools_used"] = list(dict.fromkeys(tools_used))  # 중복 제거, 순서 유지
+    new_messages = [{"role": "user", "content": body.message}, assistant_message]
     if body.conversation_id:
         conversation_service.append_messages(body.conversation_id, new_messages)
         conversation_id = body.conversation_id

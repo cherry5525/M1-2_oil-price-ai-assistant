@@ -3,6 +3,9 @@
 Firestore는 읽은 문서 수만큼 무료 한도(하루 5만 건)가 줄어듭니다.
 그래서 전체 데이터를 5분 동안 메모리에 보관하고, 데이터가 바뀌면(추가/수정/삭제) 즉시 비웁니다.
 """
+import logging
+import math
+import re
 import time
 from collections import defaultdict
 from threading import Lock
@@ -12,6 +15,9 @@ from firebase_client import db  # 변수 이름이 db가 아니면 다른 파일
 
 COLLECTION = "data"
 CACHE_TTL_SECONDS = 300
+
+logger = logging.getLogger(__name__)
+_DATE_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 _lock = Lock()
 _cache = {"records": None, "rows": None, "loaded_at": 0.0}
@@ -36,8 +42,17 @@ def _load_all() -> Tuple[List[dict], List[Row]]:
         records: List[dict] = []
         for doc in db.collection(COLLECTION).order_by("date").stream():
             d = doc.to_dict()
-            if "date" in d and "value" in d:
-                records.append({"date": d["date"], "value": float(d["value"]), "memo": d.get("memo") or ""})
+            date_str, raw = d.get("date"), d.get("value")
+            valid = (
+                isinstance(date_str, str) and _DATE_PATTERN.fullmatch(date_str)
+                and isinstance(raw, (int, float)) and not isinstance(raw, bool)
+                and math.isfinite(raw)
+            )
+            if not valid:
+                # 손상된 문서 1개 때문에 요약/채팅/그래프 전체가 멈추지 않도록 건너뛴다
+                logger.warning("손상된 데이터 문서를 건너뜁니다: id=%s date=%r value=%r", doc.id, date_str, raw)
+                continue
+            records.append({"date": date_str, "value": float(raw), "memo": d.get("memo") or ""})
         rows = [(r["date"], r["value"]) for r in records]
 
         _cache["records"] = records

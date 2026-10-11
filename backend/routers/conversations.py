@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 @router.post("", response_model=ConversationDetail, status_code=status.HTTP_201_CREATED)
 def create_conversation(body: ConversationCreate):
     """대화 저장 (제목을 안 보내면 첫 질문으로 자동 생성)"""
-    messages = [m.model_dump() for m in body.messages]
+    messages = [m.model_dump(exclude_defaults=True) for m in body.messages]  # 빈 tools_used는 저장하지 않음
     return conversation_service.create_conversation(messages, body.title)
 
 

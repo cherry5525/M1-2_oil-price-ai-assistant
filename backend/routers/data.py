@@ -16,11 +16,16 @@ COLLECTION = "data"
 
 
 def _to_response(doc) -> DataResponse:
+    """문서 1개를 응답으로 변환. 손상된 문서(값이 null 등)가 있어도 500이 나지 않게 방어한다."""
     d = doc.to_dict()
+    try:
+        value = float(d.get("value"))
+    except (TypeError, ValueError):
+        value = 0.0
     return DataResponse(
         id=doc.id,
-        date=d.get("date", ""),
-        value=float(d.get("value", 0)),
+        date=d.get("date") or "",
+        value=value,
         memo=d.get("memo") or "",
     )
 
@@ -117,6 +122,8 @@ def update_data(data_id: str, body: DataUpdate):
     updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="수정할 필드를 하나 이상 보내주세요.")
+    if "memo" in updates and updates["memo"] is None:
+        updates["memo"] = ""  # 메모를 null로 보내면 빈 메모로 저장
 
     # 날짜를 바꾸는 경우 다른 문서와 중복되는지 확인
     if "date" in updates:

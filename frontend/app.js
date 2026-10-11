@@ -31,8 +31,15 @@ function showToast(message, isError = false) {
 }
 
 // 서버 호출 공통 함수: 에러 메시지 정리 + 느린 응답(콜드 스타트) 안내
+let slowRequests = 0; // 4초 넘게 걸리고 있는 요청의 수 (여러 요청이 동시에 진행될 수 있음)
+
 async function api(path, options = {}) {
-  const slowTimer = setTimeout(() => $("#notice").classList.remove("hidden"), 4000);
+  let isSlow = false;
+  const slowTimer = setTimeout(() => {
+    isSlow = true;
+    slowRequests += 1;
+    $("#notice").classList.remove("hidden");
+  }, 4000);
   try {
     let res;
     try {
@@ -56,7 +63,8 @@ async function api(path, options = {}) {
     return await res.json();
   } finally {
     clearTimeout(slowTimer);
-    $("#notice").classList.add("hidden");
+    if (isSlow) slowRequests -= 1;
+    if (slowRequests === 0) $("#notice").classList.add("hidden"); // 느린 요청이 모두 끝났을 때만 숨김
   }
 }
 
@@ -73,6 +81,7 @@ function el(tag, className, text) {
 function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
   $("#themeBtn").textContent = theme === "dark" ? "☀️" : "🌙";
+  $("#themeBtn").setAttribute("aria-label", theme === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환");
 }
 
 function initTheme() {
@@ -280,6 +289,7 @@ async function loadConversations() {
 
       const del = el("button", "conv-del", "✕");
       del.title = "대화 삭제";
+      del.setAttribute("aria-label", `"${c.title}" 대화 삭제`);
       del.addEventListener("click", (e) => {
         e.stopPropagation();
         deleteConversation(c);
@@ -300,7 +310,7 @@ async function openConversation(id) {
     const conv = await api(`/api/conversations/${encodeURIComponent(id)}`);
     currentConversationId = conv.id;
     $("#messages").innerHTML = "";
-    conv.messages.forEach((m) => addMessage(m.role, m.content));
+    conv.messages.forEach((m) => addMessage(m.role, m.content, m.tools_used || []));
     showTab("chat");
     highlightActiveConversation();
   } catch (e) {
@@ -359,8 +369,10 @@ function buildRow(item) {
 
   const actions = el("td", "actions");
   const editBtn = el("button", "", "수정");
+  editBtn.setAttribute("aria-label", `${item.date} 데이터 수정`);
   editBtn.addEventListener("click", () => tr.replaceWith(buildEditRow(item)));
   const delBtn = el("button", "danger", "삭제");
+  delBtn.setAttribute("aria-label", `${item.date} 데이터 삭제`);
   delBtn.addEventListener("click", () => deleteData(item));
   actions.append(editBtn, delBtn);
   tr.appendChild(actions);

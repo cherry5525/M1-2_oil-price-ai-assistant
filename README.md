@@ -26,6 +26,22 @@
 | 프론트엔드 | HTML, CSS, JavaScript (프레임워크 없음) |
 | 배포 | 백엔드: Render / 프론트엔드: Vercel |
 
+## 데이터
+
+이 서비스가 분석하는 데이터는 이전 과제(M1-1)에서 직접 수집하고 정제한 김해시 휘발유 가격입니다.
+
+| 항목 | 내용 |
+|---|---|
+| 출처 | 한국석유공사 **오피넷(Opinet)** "유가내려받기" 서비스 (https://www.opinet.co.kr) |
+| 대상 | 경남 김해시, 휘발유 |
+| 기간 | 2023-01-01 ~ 2026-09-29 (일별, 1,368일. 빠진 날짜 없음) |
+| 단위 | 원/L |
+| 수집 방법 | 오피넷에서 지역·유종·기간을 지정해 연도별 CSV를 직접 다운로드 |
+| 가공 | 연도별 원본 파일을 합친 뒤 날짜별 평균으로 1차 정제 → 최종 파일 `date, value, memo` (`backend/data/gimhae_gasoline_final.csv`) |
+
+- `date`, `value`는 위 방법으로 만든 날짜별 가격이며, 서버는 이 값으로만 요약·통계·AI 답변을 만듭니다.
+- `memo`는 일부 날짜에 붙여 둔 설명 메모입니다. **AI에는 전달되지 않으며**(AI는 날짜와 가격만 근거로 답합니다), 데이터 관리 화면과 CSV/JSON 내보내기에서만 확인할 수 있습니다.
+
 ## 배포 URL
 
 | 구분 | 주소 |
@@ -88,7 +104,7 @@ POST /api/chat
 | `get_prices` | 짧은 기간의 일별 가격 (최대 60건) |
 | `get_monthly_averages` | 월별 평균 (긴 기간의 추세) |
 
-호출 흐름: ① 질문과 요약을 GPT에 전달 → ② 요약으로 부족하면 GPT가 도구 호출을 요청 → ③ 서버가 Firestore 데이터를 조회해 결과 전달 → ④ GPT가 결과를 근거로 최종 답변 (최대 5회 반복). 어떤 도구를 썼는지는 `/api/chat` 응답의 `tools_used`와 채팅 화면의 "🔧 추가 조회" 표시로 확인할 수 있습니다.
+호출 흐름: ① 질문과 요약을 GPT에 전달 → ② 요약으로 부족하면 GPT가 도구 호출을 요청 → ③ 서버가 Firestore 데이터를 조회해 결과 전달 → ④ GPT가 결과를 근거로 최종 답변 (최대 5회 반복). 어떤 도구를 썼는지는 `/api/chat` 응답의 `tools_used`와 채팅 화면의 "🔧 추가 조회" 표시로 확인할 수 있습니다. 이 정보는 대화와 함께 저장되어 이전 대화를 다시 불러와도 표시됩니다.
 
 ### 추가 구현: 시각화와 내보내기
 
@@ -117,6 +133,8 @@ AI 호출에서 토큰(=비용)이 불필요하게 늘어나지 않도록 아래
 | 도구 호출 횟수 | 한 질문당 최대 5회 | 도구 호출이 반복되는 상황 방지 |
 | 도구 조회 결과 크기 | 일별 목록 최대 60건, 긴 기간은 월별 평균으로 요약 | 도구 결과가 커져 토큰이 늘어나는 것 방지 |
 | 답변 길이 | 시스템 프롬프트에서 "간결하게 답변"을 지시 | 출력 토큰 절약 |
+| **출력 토큰 상한** | 호출 1회당 `max_completion_tokens` 4,000 (환경 변수로 조정) | gpt-5 계열은 추론 토큰도 상한에 포함되므로 여유 있게 설정. 상한에 걸려 답이 끊기면 안내 문구를 함께 반환 |
+| **응답 대기 시간** | OpenAI 호출 timeout 60초, 재시도 1회 | AI 서버가 응답하지 않을 때 무한정 기다리거나 비용이 늘어나는 것을 방지 |
 
 개발·테스트 단계에서는 작은 질문 위주로 검증했으며, 요약 응답이 캐시되어 있어 같은 요약을 만들기 위해 DB를 반복해서 읽지도 않습니다.
 
@@ -150,10 +168,13 @@ Swagger UI(`/docs`)에서 직접 호출해 볼 수 있습니다.
 │   ├── config.py                # 환경 변수 읽기
 │   ├── firebase_client.py       # Firestore 연결
 │   ├── schemas.py               # Pydantic 모델 (요청/응답 검증)
-│   ├── load_data.py             # CSV → Firestore 적재 스크립트
 │   ├── routers/                 # data.py, chat.py, conversations.py
 │   ├── services/                # data_service.py(요약·캐시), ai_service.py, conversation_service.py
-│   └── requirements.txt
+│   ├── scripts/                 # load_data.py(CSV → Firestore 적재), check_duplicates.py, test_llm.py
+│   ├── data/                    # gimhae_gasoline_final.csv (원본 데이터)
+│   ├── tests/                   # pytest 테스트 (스키마 검증, 요약 계산, API, 채팅/대화 기록)
+│   ├── requirements.txt         # 서버 실행에 필요한 패키지 (버전 고정)
+│   └── requirements-dev.txt     # 테스트용 패키지 (pytest 등)
 ├── frontend/                    # index.html, style.css, app.js, config.js
 └── .env.example                 # 환경 변수 견본
 ```
@@ -176,13 +197,16 @@ Swagger UI(`/docs`)에서 직접 호출해 볼 수 있습니다.
 | `services/` | 실제 로직. 요약 계산, Firestore 읽기/쓰기, OpenAI 호출 |
 | `schemas.py` | 요청/응답 데이터의 모양과 검증 규칙 |
 
-이렇게 나누면 ① 같은 로직을 재사용할 수 있고(요약 계산 함수를 요약 API와 채팅이 함께 사용), ② DB를 가짜로 바꿔 끼워 서비스 로직만 따로 테스트하기 쉽고, ③ 수정 범위가 작아집니다(AI 서버 주소가 바뀌었을 때 `config.py`와 `ai_service.py`만 수정).
+이렇게 나누면 ① 같은 로직을 재사용할 수 있고(요약 계산 함수를 요약 API와 채팅이 함께 사용), ② DB를 가짜로 바꿔 끼워 서비스 로직만 따로 테스트하기 쉽고(`backend/tests/`에 실제 테스트가 있습니다), ③ 수정 범위가 작아집니다(AI 서버 주소가 바뀌었을 때 `config.py`와 `ai_service.py`만 수정).
 
 ### 3. Pydantic으로 요청 데이터를 검증한 이유와 방식
 
 잘못된 값이 DB에 저장되면 요약과 AI 답변이 모두 틀려집니다. 특히 날짜를 문자열로 저장해 기간 조회가 문자열 순서에 의존하므로 `YYYY-MM-DD` 형식이 지켜져야 정확합니다. `schemas.py`에서 다음을 검증합니다.
 
-- 날짜는 `YYYY-MM-DD` 형식 (검증 함수), 가격은 0보다 큰 값
+- 날짜는 **`YYYY-MM-DD` 형식을 정확히 지켜야** 합니다. `2024-1-5`처럼 0을 채우지 않은 표기는 거부하고, 실제로 존재하는 날짜이며 2000-01-01 ~ 오늘(한국 시간) 범위여야 합니다.
+- 가격은 0보다 크고 10,000 이하인 유한한 숫자 (NaN/Infinity 거부), 메모는 100자 이내
+- 수정(PUT)에서 `date`나 `value`를 `null`로 보내는 요청은 거부합니다. 바꾸지 않을 필드는 아예 보내지 않으면 됩니다.
+- 혹시 손상된 문서가 DB에 있어도 서비스 전체가 멈추지 않도록, 요약·통계 계산에서는 그 문서만 건너뛰고 경고 로그를 남깁니다.
 - 질문은 1~1,000자, 대화 역할은 `user` / `assistant`만 허용
 
 검증은 라우터 함수가 실행되기 **전에** FastAPI가 자동으로 수행하고, 규칙에 어긋나면 `422` 에러를 반환합니다. `response_model`로 응답 형태도 보장하고, Swagger 문서도 자동 생성됩니다.
@@ -229,7 +253,7 @@ cd backend
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python load_data.py          # 최초 1회: CSV 데이터를 Firestore에 적재
+python -m scripts.load_data   # 최초 1회: CSV 데이터를 Firestore에 적재 (여러 번 실행해도 중복 저장되지 않음)
 uvicorn main:app --reload
 ```
 
@@ -244,6 +268,24 @@ python -m http.server 5500
 
 → http://localhost:5500 접속 (`frontend/config.js`의 `API_BASE_URL`이 로컬 백엔드를 가리킵니다.)
 
+### 4. 테스트 실행 (선택)
+
+진짜 Firebase나 AI를 호출하지 않고 가짜 DB/가짜 AI로 검증하므로 키 없이도 실행됩니다.
+
+```powershell
+cd backend
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+| 테스트 파일 | 확인하는 내용 |
+|---|---|
+| `test_schemas.py` | 날짜 형식/범위, 가격, 메모 길이, 수정(PUT)에서 `null` 거부 |
+| `test_summary.py` | 요약·트렌드·월별 통계 계산, 손상된 문서 건너뛰기, 캐시 |
+| `test_data_api.py` | 데이터 CRUD의 상태 코드(404/409/422), 추가·삭제 직후 요약 갱신, CSV/JSON 내보내기 |
+| `test_chat_conversations.py` | 채팅 자동 저장, 대화 이어가기, `tools_used` 저장, 대화 기록 CRUD |
+| `test_ai_service.py` | 출력 토큰 상한, 길이 제한 처리, 대화 10개 제한, 요약 주입 |
+
 ## 환경 변수
 
 ### 백엔드 (`.env` 또는 Render 환경 변수)
@@ -252,7 +294,9 @@ python -m http.server 5500
 |---|---|---|
 | `OPENAI_API_KEY` | AI API 키 | (비공개) |
 | `OPENAI_BASE_URL` | OpenAI 호환 API 주소 | `https://copa.codyssey.kr/v1` |
-| `OPENAI_MODEL` | 사용할 모델 이름 | `gpt-5-mini` |
+| `OPENAI_MODEL` | 사용할 모델 이름 (기본값 `gpt-5-mini`) | `gpt-5-mini` |
+| `OPENAI_MAX_COMPLETION_TOKENS` | (선택) 호출당 출력 토큰 상한. 기본 `4000`. `0`이면 상한 없이 호출 | `4000` |
+| `OPENAI_TIMEOUT_SECONDS` | (선택) AI 호출 대기 제한(초). 기본 `60` | `60` |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | 서비스 계정 키 파일의 **내용 전체** (배포용) | `{ "type": "service_account", ... }` |
 | `FIREBASE_SERVICE_ACCOUNT_PATH` | 서비스 계정 키 파일 경로 (로컬용, JSON 변수가 없을 때 사용) | `serviceAccountKey.json` |
 | `ALLOWED_ORIGINS` | CORS 허용 도메인 (쉼표로 구분) | `https://oil-price-ai-assistant.vercel.app,http://localhost:5500` |

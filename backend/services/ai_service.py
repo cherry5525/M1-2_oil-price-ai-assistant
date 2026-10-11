@@ -5,14 +5,25 @@ from typing import List, Optional
 
 from openai import OpenAI
 
-from config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
+from config import (
+    OPENAI_API_KEY,
+    OPENAI_BASE_URL,
+    OPENAI_MAX_COMPLETION_TOKENS,
+    OPENAI_MODEL,
+    OPENAI_TIMEOUT_SECONDS,
+)
 from services.data_service import compute_summary, get_rows
 
 MODEL = OPENAI_MODEL
 MAX_TOOL_ROUNDS = 5  # AI가 도구를 부르는 최대 횟수 (무한 반복 방지)
 
 # 키가 없어도 서버는 켜지도록, 키가 없으면 None으로 둡니다.
-client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL) if OPENAI_API_KEY else None
+# timeout: 응답이 오지 않을 때 무한정 기다리지 않게 함 / max_retries: 실패 시 재시도 1회만
+client = (
+    OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL, timeout=OPENAI_TIMEOUT_SECONDS, max_retries=1)
+    if OPENAI_API_KEY
+    else None
+)
 
 
 # ---------------------------------------------------------------
@@ -164,16 +175,27 @@ def run_chat(message: str, history: List[dict]) -> tuple[str, List[str]]:
     tools_used: List[str] = []
 
     for _ in range(MAX_TOOL_ROUNDS):
+        # 출력 토큰 상한. gpt-5 계열은 추론 토큰도 포함되므로 넉넉하게 잡는다.
+        # (0 이하로 설정하면 상한 없이 호출 - 서버가 이 옵션을 지원하지 않을 때 사용)
+        limits = {"max_completion_tokens": OPENAI_MAX_COMPLETION_TOKENS} if OPENAI_MAX_COMPLETION_TOKENS > 0 else {}
         response = client.chat.completions.create(
             model=MODEL,
             messages=messages,
             tools=TOOLS,
+            **limits,
         )
-        reply = response.choices[0].message
+        choice = response.choices[0]
+        reply = choice.message
 
         # 도구 호출 없이 바로 답을 줬다면 끝
         if not reply.tool_calls:
-            return reply.content or "", tools_used
+            text = reply.content or ""
+            if choice.finish_reason == "length":  # 토큰 상한에 걸려 답이 끊긴 경우
+                if text:
+                    text += "\n\n(답변이 길어 중간에 끊겼어요. 질문을 더 구체적으로 해 주세요.)"
+                else:
+                    text = "답변을 끝까지 만들지 못했어요(길이 제한). 질문을 더 구체적으로 해 주세요."
+            return text, tools_used
 
         # AI가 요청한 도구를 실행하고 결과를 돌려준다
         messages.append(reply)

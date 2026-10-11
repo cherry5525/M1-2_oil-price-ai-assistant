@@ -1,5 +1,8 @@
 """Firestore 'data' 컬렉션에서 같은 날짜가 2번 이상 있는 문서를 찾는 검사 스크립트.
-읽기만 하고 아무것도 수정/삭제하지 않습니다."""
+읽기만 하고 아무것도 수정/삭제하지 않습니다.
+
+사용법 (backend 폴더에서): python -m scripts.check_duplicates
+"""
 from collections import defaultdict
 from datetime import date, timedelta
 

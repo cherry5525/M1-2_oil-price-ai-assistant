@@ -1,8 +1,9 @@
 """LLM 서버 연결 확인용 스크립트.
 
 사용법
-  1) python test_llm.py              -> 사용 가능한 모델 목록 출력
-  2) python test_llm.py 모델이름      -> 해당 모델로 일반 대화 + 도구 호출 지원 여부 테스트
+  (backend 폴더에서 실행)
+  1) python -m scripts.test_llm              -> 사용 가능한 모델 목록 출력
+  2) python -m scripts.test_llm 모델이름      -> 해당 모델로 일반 대화 + 도구 호출 지원 여부 테스트
 """
 import sys
 

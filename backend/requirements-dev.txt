@@ -1,0 +1,5 @@
+# 개발/테스트용 패키지. 서버 배포(Render)에는 필요 없고, 테스트를 돌릴 때만 설치합니다.
+#   pip install -r requirements-dev.txt
+-r requirements.txt
+pytest
+httpx
