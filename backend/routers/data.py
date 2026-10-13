@@ -4,11 +4,17 @@ import json
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
-from google.cloud.firestore_v1 import Query as FSQuery
 
 from firebase_client import db  # firebase_client.py에서 만든 Firestore 클라이언트
 from schemas import DataCreate, DataResponse, DataStatistics, DataSummary, DataUpdate
-from services.data_service import compute_summary, get_records, invalidate_cache, monthly_statistics
+from services.data_service import (
+    cache_remove,
+    cache_upsert_doc,
+    compute_summary,
+    get_records,
+    list_records,
+    monthly_statistics,
+)
 
 router = APIRouter(prefix="/api/data", tags=["data"])
 
@@ -86,9 +92,10 @@ def create_data(body: DataCreate):
     if exists:
         raise HTTPException(status_code=409, detail=f"{body.date} 날짜의 데이터가 이미 존재합니다.")
 
-    _, ref = db.collection(COLLECTION).add(body.model_dump())
-    invalidate_cache()
-    return _to_response(ref.get())
+    data = body.model_dump()
+    _, ref = db.collection(COLLECTION).add(data)
+    cache_upsert_doc(ref.id, data)  # 캐시에 이 한 건만 반영 (전체를 다시 읽지 않음)
+    return DataResponse(id=ref.id, date=data["date"], value=data["value"], memo=data["memo"])
 
 
 @router.get("", response_model=List[DataResponse])
@@ -99,17 +106,8 @@ def list_data(
     limit: int = Query(100, ge=1, le=2000, description="최대 반환 건수"),
     offset: int = Query(0, ge=0, description="건너뛸 건수"),
 ):
-    """데이터 목록 조회 (기간 필터, 정렬, 페이지네이션)"""
-    query = db.collection(COLLECTION)
-    if start_date:
-        query = query.where("date", ">=", start_date)
-    if end_date:
-        query = query.where("date", "<=", end_date)
-
-    direction = FSQuery.DESCENDING if order == "desc" else FSQuery.ASCENDING
-    query = query.order_by("date", direction=direction).offset(offset).limit(limit)
-
-    return [_to_response(doc) for doc in query.stream()]
+    """데이터 목록 조회 (기간 필터, 정렬, 페이지네이션). 캐시에서 만들므로 Firestore 읽기를 소모하지 않습니다."""
+    return [DataResponse(**r) for r in list_records(start_date, end_date, order, limit, offset)]
 
 
 @router.put("/{data_id}", response_model=DataResponse)
@@ -132,8 +130,9 @@ def update_data(data_id: str, body: DataUpdate):
             raise HTTPException(status_code=409, detail=f"{updates['date']} 날짜의 데이터가 이미 존재합니다.")
 
     ref.update(updates)
-    invalidate_cache()
-    return _to_response(ref.get())
+    snapshot = ref.get()
+    cache_upsert_doc(snapshot.id, snapshot.to_dict())  # 캐시에 이 한 건만 반영
+    return _to_response(snapshot)
 
 
 @router.delete("/{data_id}")
@@ -143,5 +142,5 @@ def delete_data(data_id: str):
     if not ref.get().exists:
         raise HTTPException(status_code=404, detail="해당 id의 데이터를 찾을 수 없습니다.")
     ref.delete()
-    invalidate_cache()
+    cache_remove(data_id)  # 캐시에서 이 한 건만 제거
     return {"message": "삭제되었습니다.", "id": data_id}

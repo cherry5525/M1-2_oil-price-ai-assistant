@@ -73,10 +73,11 @@ def test_summary_updates_after_put(client, db):
     assert client.get("/api/data/summary").json()["metrics"]["max"] == 1900.0
 
 
-def test_list_survives_corrupted_documents(client, db):
+def test_list_skips_corrupted_documents_instead_of_failing(client, db):
     seed_three(db)
     db.collections["data"]["bad"] = {"date": None, "value": None, "memo": None}
-    assert client.get("/api/data").status_code == 200
+    r = client.get("/api/data")
+    assert r.status_code == 200 and len(r.json()) == 3  # 손상된 문서는 목록/요약에서 제외된다
 
 
 def test_list_filters_order_and_pagination(client, db):

@@ -1,7 +1,9 @@
 """가격 데이터 읽기(캐시) + 요약/월별 통계 계산 + 내보내기용 레코드.
 
-Firestore는 읽은 문서 수만큼 무료 한도(하루 5만 건)가 줄어듭니다.
-그래서 전체 데이터를 5분 동안 메모리에 보관하고, 데이터가 바뀌면(추가/수정/삭제) 즉시 비웁니다.
+Firestore는 읽은 문서 수만큼 무료 한도(하루 5만 건)가 줄어듭니다. 그래서
+  - 전체 데이터(1,368건)를 서버 메모리에 한 번 읽어 두고, 조회(요약/통계/목록/내보내기/AI 도구)는 모두 여기서 처리합니다.
+  - 데이터를 추가·수정·삭제하면 Firestore에 쓰는 동시에 메모리 캐시도 '그 한 건만' 바로 고칩니다. (전체를 다시 읽지 않음)
+  - Firestore를 직접 고친 경우(콘솔, 적재 스크립트)를 반영하기 위해 6시간마다 한 번 전체를 다시 읽습니다.
 """
 import logging
 import math
@@ -14,7 +16,7 @@ from typing import Dict, List, Optional, Tuple
 from firebase_client import db  # 변수 이름이 db가 아니면 다른 파일과 똑같이 맞춰주세요
 
 COLLECTION = "data"
-CACHE_TTL_SECONDS = 300
+CACHE_TTL_SECONDS = 6 * 60 * 60
 
 logger = logging.getLogger(__name__)
 _DATE_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
@@ -25,8 +27,31 @@ _cache = {"records": None, "rows": None, "loaded_at": 0.0}
 Row = Tuple[str, float]  # (날짜, 가격)
 
 
+def _make_record(doc_id: str, d: dict) -> Optional[dict]:
+    """Firestore 문서(dict)를 캐시용 레코드로 바꾼다. 손상된 문서면 None"""
+    date_str, raw = d.get("date"), d.get("value")
+    valid = (
+        isinstance(date_str, str) and _DATE_PATTERN.fullmatch(date_str)
+        and isinstance(raw, (int, float)) and not isinstance(raw, bool)
+        and math.isfinite(raw)
+    )
+    if not valid:
+        # 손상된 문서 1개 때문에 요약/채팅/그래프 전체가 멈추지 않도록 건너뛴다
+        logger.warning("손상된 데이터 문서를 건너뜁니다: id=%s date=%r value=%r", doc_id, date_str, raw)
+        return None
+    return {"id": doc_id, "date": date_str, "value": float(raw), "memo": d.get("memo") or ""}
+
+
+def _store(records: List[dict]) -> None:
+    """레코드를 날짜순으로 정렬해 캐시에 저장한다. (호출하는 쪽이 _lock을 잡고 있어야 함)
+    기존 리스트를 고치지 않고 새 리스트로 바꿔 끼우므로, 읽는 중인 다른 요청에는 영향이 없다."""
+    records = sorted(records, key=lambda r: (r["date"], r["id"]))
+    _cache["records"] = records
+    _cache["rows"] = [(r["date"], r["value"]) for r in records]
+
+
 def invalidate_cache() -> None:
-    """데이터가 바뀌었을 때 호출: 다음 조회 때 Firestore에서 새로 읽는다."""
+    """캐시를 비운다: 다음 조회 때 Firestore에서 전체를 새로 읽는다."""
     with _lock:
         _cache["records"] = None
         _cache["rows"] = None
@@ -39,26 +64,33 @@ def _load_all() -> Tuple[List[dict], List[Row]]:
         if fresh:
             return _cache["records"], _cache["rows"]
 
-        records: List[dict] = []
+        records = []
         for doc in db.collection(COLLECTION).order_by("date").stream():
-            d = doc.to_dict()
-            date_str, raw = d.get("date"), d.get("value")
-            valid = (
-                isinstance(date_str, str) and _DATE_PATTERN.fullmatch(date_str)
-                and isinstance(raw, (int, float)) and not isinstance(raw, bool)
-                and math.isfinite(raw)
-            )
-            if not valid:
-                # 손상된 문서 1개 때문에 요약/채팅/그래프 전체가 멈추지 않도록 건너뛴다
-                logger.warning("손상된 데이터 문서를 건너뜁니다: id=%s date=%r value=%r", doc.id, date_str, raw)
-                continue
-            records.append({"date": date_str, "value": float(raw), "memo": d.get("memo") or ""})
-        rows = [(r["date"], r["value"]) for r in records]
-
-        _cache["records"] = records
-        _cache["rows"] = rows
+            record = _make_record(doc.id, doc.to_dict())
+            if record:
+                records.append(record)
+        _store(records)
         _cache["loaded_at"] = time.time()
-        return records, rows
+        return _cache["records"], _cache["rows"]
+
+
+def cache_upsert_doc(doc_id: str, data: dict) -> None:
+    """추가/수정된 문서 1건을 캐시에 반영한다. (캐시가 아직 없으면 아무것도 하지 않음: 첫 조회 때 읽어 옴)
+    문서가 손상된 상태이면 캐시에서 제외한다."""
+    with _lock:
+        if _cache["records"] is None:
+            return
+        others = [r for r in _cache["records"] if r["id"] != doc_id]
+        record = _make_record(doc_id, data)
+        _store(others + ([record] if record else []))
+
+
+def cache_remove(doc_id: str) -> None:
+    """삭제된 문서 1건을 캐시에서 뺀다."""
+    with _lock:
+        if _cache["records"] is None:
+            return
+        _store([r for r in _cache["records"] if r["id"] != doc_id])
 
 
 def _in_range(date_str: str, start_date: Optional[str], end_date: Optional[str]) -> bool:
@@ -78,7 +110,18 @@ def get_rows(start_date: Optional[str] = None, end_date: Optional[str] = None) -
 def get_records(start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[dict]:
     """기간 내 {date, value, memo} 목록을 날짜순으로 반환 (내보내기용)"""
     records, _ = _load_all()
-    return [dict(r) for r in records if _in_range(r["date"], start_date, end_date)]
+    return [{"date": r["date"], "value": r["value"], "memo": r["memo"]}
+            for r in records if _in_range(r["date"], start_date, end_date)]
+
+
+def list_records(start_date: Optional[str] = None, end_date: Optional[str] = None,
+                 order: str = "asc", limit: int = 100, offset: int = 0) -> List[dict]:
+    """기간 내 {id, date, value, memo} 목록 (정렬, 페이지 이동 지원). Firestore를 읽지 않고 캐시에서 만든다."""
+    records, _ = _load_all()
+    items = [r for r in records if _in_range(r["date"], start_date, end_date)]
+    if order == "desc":
+        items = items[::-1]
+    return [dict(r) for r in items[offset:offset + limit]]
 
 
 def _mean(values: List[float]) -> float:

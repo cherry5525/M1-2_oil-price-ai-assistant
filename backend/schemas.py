@@ -120,6 +120,26 @@ class ChatMessage(BaseModel):
     )
 
 
+class ChatMessageIn(BaseModel):
+    """POST /api/conversations 로 직접 저장하는 메시지 (입력 크기를 제한한다)"""
+    role: Literal["user", "assistant"]
+    content: str = Field(..., max_length=20000)
+    tools_used: List[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("tools_used")
+    @classmethod
+    def validate_tool_names(cls, v: List[str]) -> List[str]:
+        if any(len(name) > 50 for name in v):
+            raise ValueError("도구 이름은 50자 이하여야 합니다.")
+        return v
+
+
+class ToolCall(BaseModel):
+    """AI가 이번 답변을 만들면서 호출한 도구와 전달한 인자"""
+    name: str
+    arguments: dict = Field(default_factory=dict)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=1000, description="사용자 질문",
                          examples=["2025년 평균 휘발유 가격이 얼마야?"])
@@ -133,6 +153,7 @@ class ChatResponse(BaseModel):
     reply: str
     conversation_id: str = Field(description="자동 저장된 대화 id (다음 질문에 넣으면 대화가 이어집니다)")
     tools_used: List[str] = Field(default_factory=list, description="AI가 추가 조회에 사용한 도구")
+    tool_calls: List[ToolCall] = Field(default_factory=list, description="도구 호출 내역 (도구 이름과 인자)")
 
 
 # ---------------------------------------------------------------
@@ -140,7 +161,7 @@ class ChatResponse(BaseModel):
 # ---------------------------------------------------------------
 class ConversationCreate(BaseModel):
     title: Optional[str] = Field(default=None, max_length=100, description="생략하면 첫 질문으로 자동 생성")
-    messages: List[ChatMessage] = Field(..., min_length=1)
+    messages: List[ChatMessageIn] = Field(..., min_length=1, max_length=100)
 
 
 class ConversationSummary(BaseModel):

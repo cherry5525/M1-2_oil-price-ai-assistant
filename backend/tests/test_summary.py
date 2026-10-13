@@ -83,3 +83,37 @@ def test_cache_is_used_until_invalidated(db):
     assert data_service.compute_summary()["count"] == 1  # 캐시 때문에 아직 1건
     data_service.invalidate_cache()
     assert data_service.compute_summary()["count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# 트렌드 판정 경계값 (+0.5% / -0.5% / 데이터 60건 미만)
+# ---------------------------------------------------------------------------
+import pytest
+
+
+@pytest.mark.parametrize("recent, label", [
+    (1005.0, "상승"),   # 정확히 +0.5%는 상승
+    (1004.9, "유지"),   # +0.49%
+    (1000.0, "유지"),
+    (995.1, "유지"),    # -0.49%
+    (995.0, "하락"),    # 정확히 -0.5%는 하락
+])
+def test_trend_threshold_boundaries(db, recent, label):
+    db.seed_prices(daily("2025-01-01", [1000.0] * 30 + [recent] * 30))  # 직전 30일 평균 1000
+    assert data_service.compute_summary()["trend"].startswith(label)
+
+
+def test_trend_uses_30_day_windows_from_exactly_60_rows(db):
+    db.seed_prices(daily("2025-01-01", [1000.0] * 30 + [1100.0] * 30))
+    assert "직전 30일 대비" in data_service.compute_summary()["trend"]
+
+
+def test_trend_falls_back_to_simple_comparison_below_60_rows(db):
+    db.seed_prices(daily("2025-01-01", [1000.0] * 29 + [1100.0] * 30))  # 59건
+    trend = data_service.compute_summary()["trend"]
+    assert "데이터가 적어 단순 비교" in trend and trend.startswith("상승")
+
+
+def test_trend_only_looks_at_the_latest_60_days(db):
+    db.seed_prices(daily("2025-01-01", [2000.0] * 100 + [1000.0] * 30 + [1100.0] * 30))
+    assert data_service.compute_summary()["trend"].startswith("상승")  # 오래된 데이터는 영향 없음

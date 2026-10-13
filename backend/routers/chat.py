@@ -48,7 +48,8 @@ def chat(body: ChatRequest):
 
     # 3) AI 호출 (요약 주입은 ai_service 안에서 처리)
     try:
-        reply, tools_used = ai_service.run_chat(body.message, history)
+        trace: list = []  # AI가 호출한 도구와 인자가 여기에 쌓인다
+        reply, tools_used = ai_service.run_chat(body.message, history, trace=trace)
     except OpenAIError as e:
         raise HTTPException(status_code=502, detail=f"AI 호출 중 오류가 발생했습니다: {e}")
 
@@ -64,4 +65,4 @@ def chat(body: ChatRequest):
     if not conversation_id:
         conversation_id = conversation_service.create_conversation(new_messages)["id"]
 
-    return ChatResponse(reply=reply, conversation_id=conversation_id, tools_used=tools_used)
+    return ChatResponse(reply=reply, conversation_id=conversation_id, tools_used=tools_used, tool_calls=trace)

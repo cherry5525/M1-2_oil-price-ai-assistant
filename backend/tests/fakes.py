@@ -1,4 +1,7 @@
-"""진짜 Firestore 대신 쓰는 가짜 DB (테스트가 인터넷/키 없이 빠르게 돌도록)."""
+"""진짜 Firestore 대신 쓰는 가짜 DB (테스트가 인터넷/키 없이 빠르게 돌도록).
+
+읽은 문서 수를 db.counter["reads"]에 세어 둔다. (Firestore는 읽은 문서 수만큼 무료 한도가 줄어들기 때문)
+"""
 from collections import defaultdict
 
 
@@ -13,11 +16,13 @@ class Snap:
 
 
 class Ref:
-    def __init__(self, store, doc_id):
+    def __init__(self, store, doc_id, counter):
         self.store = store
         self.id = doc_id
+        self.counter = counter
 
     def get(self, transaction=None):
+        self.counter["reads"] += 1
         return Snap(self.id, self.store.get(self.id))
 
     def update(self, updates):
@@ -28,8 +33,9 @@ class Ref:
 
 
 class Query:
-    def __init__(self, store, filters=(), order=None, descending=False, skip=0, max_items=None):
+    def __init__(self, store, counter, filters=(), order=None, descending=False, skip=0, max_items=None):
         self.store = store
+        self.counter = counter
         self.filters = filters
         self.order = order
         self.descending = descending
@@ -37,7 +43,7 @@ class Query:
         self.max_items = max_items
 
     def _copy(self, **changes):
-        params = dict(store=self.store, filters=self.filters, order=self.order,
+        params = dict(store=self.store, counter=self.counter, filters=self.filters, order=self.order,
                       descending=self.descending, skip=self.skip, max_items=self.max_items)
         params.update(changes)
         return Query(**params)
@@ -71,6 +77,7 @@ class Query:
         items = items[self.skip:]
         if self.max_items is not None:
             items = items[:self.max_items]
+        self.counter["reads"] += len(items)
         return iter([Snap(i, d) for i, d in items])
 
     def get(self):
@@ -78,16 +85,16 @@ class Query:
 
 
 class Collection(Query):
-    def __init__(self, store):
-        super().__init__(store)
+    def __init__(self, store, counter):
+        super().__init__(store, counter)
 
     def document(self, doc_id):
-        return Ref(self.store, doc_id)
+        return Ref(self.store, doc_id, self.counter)
 
     def add(self, data):
         doc_id = f"doc{len(self.store) + 1}"
         self.store[doc_id] = dict(data)
-        return None, Ref(self.store, doc_id)
+        return None, Ref(self.store, doc_id, self.counter)
 
 
 class FakeTransaction:
@@ -105,12 +112,13 @@ class FakeDB:
     def __init__(self):
         self.collections = defaultdict(dict)  # 컬렉션 이름 -> {문서 id: 데이터}
         self.transaction_updates = 0
+        self.counter = {"reads": 0}           # Firestore에서 읽은 문서 수
+
+    def collection(self, name):
+        return Collection(self.collections[name], self.counter)
 
     def transaction(self):
         return FakeTransaction(self)
-
-    def collection(self, name):
-        return Collection(self.collections[name])
 
     # ---- 테스트 도우미 ----
     def seed_prices(self, rows):

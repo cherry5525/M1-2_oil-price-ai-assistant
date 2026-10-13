@@ -8,8 +8,10 @@ from services import ai_service
 def fake_ai(monkeypatch):
     calls = []
 
-    def fake_run_chat(message, history):
+    def fake_run_chat(message, history, trace=None):
         calls.append({"message": message, "history": history})
+        if trace is not None:
+            trace.append({"name": "get_price_stats", "arguments": {"start_date": "2025-03-01", "end_date": "2025-03-31"}})
         return f"답변: {message}", ["get_price_stats", "get_price_stats", "get_prices"]
 
     monkeypatch.setattr(ai_service, "client", object())  # API 키가 없어도 통과하도록
@@ -140,7 +142,7 @@ def test_reply_is_not_lost_if_conversation_is_deleted_while_ai_is_answering(clie
     monkeypatch.setattr(ai_service, "client", object())
     conv_id = None
 
-    def run_chat_and_delete(message, history):
+    def run_chat_and_delete(message, history, trace=None):
         db.collections["conversations"].pop(conv_id)  # 답변을 만드는 도중 삭제
         return "답변", []
 
@@ -153,3 +155,25 @@ def test_reply_is_not_lost_if_conversation_is_deleted_while_ai_is_answering(clie
     assert r.status_code == 200
     new_id = r.json()["conversation_id"]
     assert new_id != "c1" and db.collections["conversations"][new_id]["messages"][1]["content"] == "답변"
+
+
+# ---------------------------------------------------------------------------
+# 도구 호출 내역 / 대화 저장 입력 상한
+# ---------------------------------------------------------------------------
+def test_chat_response_includes_tool_call_arguments(client, db, fake_ai):
+    r = client.post("/api/chat", json={"message": "2025년 3월 평균은?"}).json()
+    assert r["tool_calls"] == [{"name": "get_price_stats", "arguments": {"start_date": "2025-03-01", "end_date": "2025-03-31"}}]
+
+
+def _message(**overrides):
+    return {"role": "user", "content": "안녕", **overrides}
+
+
+def test_conversation_save_limits_input_size(client, db):
+    assert client.post("/api/conversations", json={"messages": [_message(content="가" * 20000)]}).status_code == 201
+    assert client.post("/api/conversations", json={"messages": [_message(content="가" * 20001)]}).status_code == 422
+    assert client.post("/api/conversations", json={"messages": [_message()] * 100}).status_code == 201
+    assert client.post("/api/conversations", json={"messages": [_message()] * 101}).status_code == 422
+    assert client.post("/api/conversations", json={"messages": [_message(tools_used=["a"] * 11)]}).status_code == 422
+    assert client.post("/api/conversations", json={"messages": [_message(tools_used=["가" * 51])]}).status_code == 422
+    assert client.post("/api/conversations", json={"title": "가" * 101, "messages": [_message()]}).status_code == 422

@@ -1,7 +1,9 @@
 // =====================================================================
 // 설정 / 상태
 // =====================================================================
-const API = (window.API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+const LOCAL_HOSTS = ["localhost", "127.0.0.1"];
+// 배포 환경에서 API_BASE_URL이 비어 있을 때 조용히 로컬 주소로 요청하다 실패하지 않도록, 로컬에서만 기본값을 쓴다
+const API = (window.API_BASE_URL || (LOCAL_HOSTS.includes(location.hostname) ? "http://127.0.0.1:8000" : "")).replace(/\/$/, "");
 const PAGE_SIZE = 20;
 
 const $ = (selector) => document.querySelector(selector);
@@ -34,6 +36,9 @@ function showToast(message, isError = false) {
 let slowRequests = 0; // 4초 넘게 걸리고 있는 요청의 수 (여러 요청이 동시에 진행될 수 있음)
 
 async function api(path, options = {}) {
+  if (!API) {
+    throw new Error("API 서버 주소(API_BASE_URL)가 설정되지 않았어요. 배포 환경 변수를 확인해 주세요.");
+  }
   let isSlow = false;
   const slowTimer = setTimeout(() => {
     isSlow = true;
@@ -161,6 +166,11 @@ function scrollMessages() {
   box.scrollTop = box.scrollHeight;
 }
 
+function formatToolCall(call) {
+  const args = Object.entries(call.arguments || {}).map(([key, value]) => `${key}=${value}`).join(", ");
+  return `${call.name}(${args})`;
+}
+
 function addMessage(role, text, toolsUsed = []) {
   const row = el("div", `msg ${role}`);
   const wrap = el("div");
@@ -225,7 +235,9 @@ async function sendMessage(text) {
 
     const res = await api("/api/chat", { method: "POST", body: JSON.stringify(body) });
     loading.remove();
-    addMessage("assistant", res.reply, res.tools_used || []);
+    // 도구 호출 내역(이름 + 인자)이 있으면 그대로 보여 주어, AI가 어떤 근거로 어떤 조회를 했는지 확인할 수 있게 한다
+    const toolLabels = (res.tool_calls || []).length ? res.tool_calls.map(formatToolCall) : (res.tools_used || []);
+    addMessage("assistant", res.reply, toolLabels);
     currentConversationId = res.conversation_id;
     await loadConversations();
   } catch (e) {
