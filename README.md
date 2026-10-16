@@ -295,7 +295,7 @@ AI 모델은 내 데이터를 모르고, 이전 요청도 기억하지 못합니
 
 ### 6. 배포 환경에서 CORS, 환경변수, 키 관리가 필요한 이유
 
-- **CORS**: 브라우저는 보안상 다른 주소로 보내는 요청을 기본으로 막습니다. 프론트엔드(Vercel)와 백엔드(Render)의 주소가 달라서, 백엔드가 `ALLOWED_ORIGINS`로 허용할 주소를 알려 주어야 합니다. 개발 중에는 전체 허용(`*`)도 쓸 수 있지만, 배포에서는 내 프론트엔드 주소만 허용합니다. (CORS는 브라우저 정책이라 `curl` 같은 도구의 직접 호출은 막지 못합니다. 이 한계는 아래 "보안과 알려진 한계"에 적었습니다.)
+- **CORS**: 브라우저는 보안상 다른 주소로 보내는 요청을 기본으로 막습니다. 프론트엔드(Vercel)와 백엔드(Render)의 주소가 달라서, 백엔드가 `ALLOWED_ORIGINS`로 허용할 주소를 알려 주어야 합니다. 설정하지 않으면 로컬 개발 주소만 허용하고, 배포에서는 내 프론트엔드 주소만 허용합니다. 쿠키나 로그인 정보를 쓰지 않으므로 자격 증명 전달(`allow_credentials`)은 끄고, 허용 메서드와 헤더도 프론트엔드가 쓰는 것(`GET/POST/PUT/DELETE`, `Content-Type`)으로 좁혔습니다. (CORS는 브라우저 정책이라 `curl` 같은 도구의 직접 호출은 막지 못합니다. 이 한계는 아래 "보안과 알려진 한계"에 적었습니다.)
 - **환경변수**: 코드와 비밀을 분리하기 위해서입니다. 코드는 GitHub에 올라가므로 API 키가 함께 올라가면 누구나 내 비용으로 AI를 사용할 수 있습니다. 그래서 `.gitignore`로 키 파일을 제외하고, Render/Vercel의 환경변수 설정에 값을 넣었습니다.
 - **키 관리**: Render에는 키 파일을 올릴 수 없어서 Firebase 서비스 계정 키를 파일 내용 그대로 환경변수(`FIREBASE_SERVICE_ACCOUNT_JSON`)로 받도록 구현했습니다. 또 브라우저에서는 코드가 누구에게나 보이므로 OpenAI 키는 프론트엔드에 두지 않고 백엔드에만 두었습니다.
 
@@ -381,7 +381,7 @@ python -m pytest
 | `CHAT_DAILY_LIMIT` | (선택) 서버 전체 합산 하루 최대 질문 수. 기본 `300` (0 이하는 기본값 적용) | `300` |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | 서비스 계정 키 파일의 **내용 전체** (배포용) | `{ "type": "service_account", ... }` |
 | `FIREBASE_SERVICE_ACCOUNT_PATH` | 서비스 계정 키 파일 경로 (로컬용, JSON 변수가 없을 때 사용) | `serviceAccountKey.json` |
-| `ALLOWED_ORIGINS` | CORS 허용 도메인 (쉼표로 구분) | `https://oil-price-ai-assistant.vercel.app,http://localhost:5500` |
+| `ALLOWED_ORIGINS` | CORS 허용 도메인 (쉼표로 구분, 끝의 `/`는 자동 제거). 생략하면 로컬 개발 주소만 허용 | `https://oil-price-ai-assistant.vercel.app,http://localhost:5500` |
 
 ### 프론트엔드 (Vercel 환경 변수)
 

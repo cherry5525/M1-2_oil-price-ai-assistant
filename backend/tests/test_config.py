@@ -74,3 +74,28 @@ def test_default_model_matches_env_example(monkeypatch):
     finally:
         monkeypatch.undo()
         importlib.reload(config)
+
+
+# ---------------------------------------------------------------------------
+# CORS 허용 출처 해석
+# ---------------------------------------------------------------------------
+def test_allowed_origins_default_is_local_only_not_wildcard(monkeypatch):
+    monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)  # 내 .env의 값이 섞이지 않게
+    try:
+        importlib.reload(config)
+        assert "*" not in config.ALLOWED_ORIGINS
+        assert config.ALLOWED_ORIGINS == ["http://localhost:5500", "http://127.0.0.1:5500"]
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)
+
+
+def test_allowed_origins_are_trimmed_and_trailing_slash_removed(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", " https://a.vercel.app/ , http://localhost:5500,, ")
+    try:
+        importlib.reload(config)
+        assert config.ALLOWED_ORIGINS == ["https://a.vercel.app", "http://localhost:5500"]
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)

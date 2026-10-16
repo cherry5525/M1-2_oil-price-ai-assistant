@@ -47,4 +47,7 @@ FIREBASE_SERVICE_ACCOUNT_PATH = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "serv
 FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
 
 # ---- CORS ----
-ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+# 환경 변수를 깜빡해도 모든 사이트가 허용되지 않도록, 기본값은 로컬 개발 주소만 허용한다.
+# 배포(Render)에서는 반드시 프론트엔드 주소로 설정한다. (끝의 "/"는 자동으로 제거해서 흔한 입력 실수를 막는다)
+_DEFAULT_ORIGINS = "http://localhost:5500,http://127.0.0.1:5500"
+ALLOWED_ORIGINS = [o.strip().rstrip("/") for o in os.getenv("ALLOWED_ORIGINS", _DEFAULT_ORIGINS).split(",") if o.strip()]
